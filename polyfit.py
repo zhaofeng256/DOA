@@ -114,6 +114,7 @@ def d(x, y, x1, y1):
 
     plt.show()
 
+
 def e(x, y):
     z = list(zip(x, y))
     s = np.array(sorted(z))
@@ -130,6 +131,29 @@ def e(x, y):
 
     plt.show()
 
+def fun(left, right):
+    c = [316.87223711, -1067.66273881,  1797.2452039,  -1206.43752124,  -283.1867752,  443.09698022]
+    if left < right:
+        x = left / right
+    else:
+        x = right / left
+    f = np.polynomial.polynomial.polyval(x, c)
+    return f
+def get_angle(left, right):
+    c = [316.87223711, -1067.66273881,  1797.2452039,  -1206.43752124,  -283.1867752,  443.09698022]
+    if left < right:
+        x = left / right
+    else:
+        x = right / left
+    f = np.polynomial.polynomial.polyval(x, c)
+    angle = f * 360 / 881
+
+    if left < right:
+        angle = 90 - angle
+    else:
+        angle += 90
+
+    return angle
 def c():
     left = np.array([101, 54, 274, 209, 214, 211, 214, 213, 216, 210, 198, 92, 100, 83, 83, 99, 95, 91, 50, 52, 44, 51, 50, 45, 54, 44, 91, 115, 88, 89, 487, 235, 256, 255, 251])
     right = np.array([333, 396, 379, 291, 296, 290, 297, 294, 296, 289, 272, 344, 370, 304, 305, 370, 359, 340, 368, 392, 327, 385, 368, 326, 394, 329, 404, 506, 386, 399, 488, 235, 253, 252, 254])
@@ -143,14 +167,44 @@ def c():
     # x1 = np.asarray(right) / np.asarray(left)
     # d(x, y, x1, y1)
 
-    right = np.append(right,[357, 318, 291, 386, 339, 339, 370, 348, 314, 389, 364, 369, 368, 400, 339, 395, 396, 398, 339, 377])
-    left = np.append(left, [208, 201, 182, 243, 208, 211, 109, 104, 93, 115, 107, 111, 109, 61, 59, 63, 61, 63, 51, 58])
-    y = np.append(y, [58, 58, 58, 58, 58, 58, 124, 124, 124, 124, 124, 124, 124, 178, 178, 178, 178, 178, 178, 178])
-    x = np.asarray(left) / np.asarray(right)
-    e(x, y)
+    # right = np.append(right,[357, 318, 291, 386, 339, 339, 370, 348, 314, 389, 364, 369, 368, 400, 339, 395, 396, 398, 339, 377])
+    # left = np.append(left, [208, 201, 182, 243, 208, 211, 109, 104, 93, 115, 107, 111, 109, 61, 59, 63, 61, 63, 51, 58])
+    # y = np.append(y, [58, 58, 58, 58, 58, 58, 124, 124, 124, 124, 124, 124, 124, 178, 178, 178, 178, 178, 178, 178])
+    # x = np.asarray(left) / np.asarray(right)
+    # e(x, y)
 
+    f = np.zeros(left.shape)
+
+    for i in range(len(left)):
+        f[i] = fun(left[i], right[i])
+
+    z = list(zip(x, f))
+    s = np.array(sorted(z))
+    s = s.T
+    x = s[0]
+    f = s[1]
+
+    _ = plt.plot(x, f+100, 'r', label='Fitted line')
+
+    plt.show()
+
+    angle = np.zeros(left.shape)
+    f = f * 360 / 881
+    for i in range(len(f)):
+       if x[i] < 1:
+           angle[i] = 90 - f[i]
+       else:
+           angle[i] = 90 + f[i]
+    angle = np.sort(angle)
+
+    print(angle)
+    #angle = np.zeros(left.shape)
+    for i in range(len(left)):
+        angle[i] = get_angle(left[i], right[i])
+
+    angle = np.sort(angle)
+    print(angle)
     return
-
     # print(len(left))
     # print(len(right))
     # print(len(y))
@@ -160,6 +214,7 @@ def c():
     s = s.T
     x = s[0]
     y = s[1]
+
 
     # A = np.vstack([x, np.ones(len(x))]).T
     # m, c = np.linalg.lstsq(A, y, rcond=None)[0]
