@@ -5,9 +5,17 @@ import pyaudio
 import math
 import numpy as np
 import pyqtgraph as pg
+import time
+import padasip as pa
+
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QApplication, QWidget, QGridLayout
 from PyQt5.QtCore import QTimer
+
+
+from numpy import array, concatenate, argmax
+from numpy import abs as nabs
+from scipy.signal import fftconvolve
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 2
@@ -15,7 +23,7 @@ RATE = 44100
 FREQ_MAX = RATE // 2
 FREQ_MIN = 20
 CHUNK = 2 * RATE // FREQ_MIN
-DELAY = 50
+DELAY = 20
 
 
 class WinForm(QWidget):
@@ -90,7 +98,8 @@ class WinForm(QWidget):
         self.waveform_right.setXRange(0, CHUNK)
         self.left_x_axis = self.waveform_left.getAxis("bottom")
         self.left_x_axis.setStyle(tickAlpha=0.5)
-
+        self.right_x_axis = self.waveform_right.getAxis("bottom")
+        self.right_x_axis.setStyle(tickAlpha=0.5)
 class AudioStream:
     def __init__(self):
         self.m = property(WinForm)
@@ -115,6 +124,9 @@ class AudioStream:
         self.timer = QTimer()
         self.timer.timeout.connect(self.update)
         self.timer.start(DELAY)
+        self.timer_cnt = 0
+        self.left_max_temp = 0
+        self.right_max_temp = 0
 
     def update(self):
         wf_data = self.stream.read(CHUNK)
@@ -150,31 +162,107 @@ class AudioStream:
 
         self.m.waveform_left.plot(self.x, lefts, pen="c", clear=True)
         self.m.waveform_right.plot(self.x, rights, pen="r", clear=True)
-        angle = doa(lefts, rights)
-        self.m.left_x_axis.setLabel("ANGLE:{:.0f}".format(angle), **self.m.sp_style)
+
+        # left_rms = rmsValue(lefts, cnt)
+        # right_rms =  rmsValue(rights, cnt)
+        # self.m.left_x_axis.setLabel("RMS:{:.0f}".format(left_rms), **self.m.sp_style)
+        # self.m.right_x_axis.setLabel("RMS:{:.0f}".format(right_rms), **self.m.sp_style)
+
+
+        # if right_rms:
+        #     v = left_rms / right_rms
+        #     print('{:.6f}'.format(v))
+
+        left_max = np.max(lefts)
+        right_max = np.max(rights)
+
+        self.timer_cnt += 1
+        if (self.timer_cnt % (3000 // DELAY) == 0):
+            self.left_max_temp = 0
+            self.right_max_temp = 0
+            self.timer_cnt = 0
+        if left_max > self.left_max_temp:
+            self.left_max_temp = left_max
+        if right_max > self.right_max_temp:
+            self.right_max_temp = right_max
+
+        self.m.left_x_axis.setLabel(self.left_max_temp, **self.m.sp_style)
+        self.m.right_x_axis.setLabel(self.right_max_temp, **self.m.sp_style)
+
+        #
+        # if v_rms > 30:
+        #     # angle = doa(lefts, rights)
+        #     angle = sound_direction(lefts, rights, cnt, 1)
+        #     self.m.left_x_axis.setLabel("ANGLE:{:.0f}".format(angle), **self.m.sp_style)
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self.timer.stop()
         self.stream.close()
 
+def rmsValue(arr, n):
+    square = 0
+    mean = 0.0
+    root = 0.0
+    #Calculate square
+    for i in range(0,n):
+        square += (arr[i]**2)
+        #Calculate Mean
+        mean = (square / (float)(n))
+        #Calculate Root
+        root = math.sqrt(mean)
+    return root
+def crossco(wav):
+    """Returns cross correlation function of the left and right audio. It
+    uses a convolution of left with the right reversed which is the
+    equivalent of a cross-correlation.
+    """
+    cor = nabs(fftconvolve(wav[0],wav[1][::-1]))
+    return cor
+def sound_direction(left, right, chunksize, width):
+    # zero pad each channel with zeroes as long as the source
+    left = concatenate((left, [0] * chunksize))
+    right = concatenate((right, [0] * chunksize))
+
+    chunk = (left, right)
+
+    # if the volume is very low (800 or less), assume 0 degrees
+    if abs(max(left)) < 800:
+        a = 0.0
+    else:
+        # otherwise computing how many frames delay there are in this chunk
+        cor = argmax(crossco(chunk)) - chunksize * 2
+        # calculate the time
+        t = cor / RATE
+        # get the distance assuming v = 340m/s sina=(t*v)/width
+        sina = t / width
+        if abs(sina) >=1:
+            print(sina)
+            a = 0.0
+        else:
+            a = math.asin(sina) * 180 / (3.14159)
+
+    print('angle=', a)
+    return a
+
 def doa(lefts, rights):
     fs = RATE #Sampling frequency(Hz)
     d_micro = 0.1 # Distance between microphones(m)
     c = 340 # Speed of sound(m / s)
-    muestrasMAX = np.ceil(d_micro * fs / c) #Maximum; number; of; samples; Nmax;
-    DESP = int(np.ceil(muestrasMAX * 1.5)) # Delay we insert in the micro 2 We leave 50 % of margin of error
+    muestrasMAX = int(np.ceil(d_micro * fs / c)) #Maximum; number; of; samples; Nmax;
+    DESP = int(np.ceil(muestrasMAX * 1.5)) # Delay we insert in the micro 2 We leave 50 of margin of error
 
     signal = lefts # Signal in MIC; B
-    d = rights# Signal in MIC; A % NORMALIZATION PROCESS
-    M1 = max(np.abs(signal))# Maximum of channel 1
-    M2 = max(np.abs(d))# Maximum of channel 2
+    d = rights # Signal in MIC; A % NORMALIZATION PROCESS
+    M1 = np.max(np.abs(signal))# Maximum of channel 1
+    M2 = np.max(np.abs(d))# Maximum of channel 2
     M3 = max(M1, M2)# Normalization value
     signal = signal / M3 * 2#Normalizing
     d = d / M3 * 2
 
     # LMS ALGORITHM
-    hDESP = [np.zeros(DESP), 1]# Filter to delay the signal DESP samples.
-    d1 = np.convolve(hDESP, d)
+    hDESP = np.zeros(DESP)# Filter to delay the signal DESP samples.
+    hDESP = np.append(hDESP, 1)
+    d1 = np.convolve(hDESP, d, mode='same')
 
     # Parameters of the algorithm
     P = 50
@@ -182,14 +270,21 @@ def doa(lefts, rights):
     h0 = np.zeros(P)
     h0[0] = 0#Initialazing the adaptative filter
 
-    h, y, e = f_adap(signal, d1, h0, mu) # Recursive function calculating the coefficients of the filter h(n)
+    # h, y, e = f_adap(signal, d1, h0, mu) # Recursive function calculating the coefficients of the filter h(n)
+    # print(muestrasMAX, signal.shape, len(d), d1.shape)
+    # f = pa.filters.FilterLMS(len(signal), mu=mu)
+    # y, e, h = f.run(d1, signal)
+
+    h = lms(signal, d1, N = P, mu = mu)
 
     # PROCESSING THE FIcfLTER BEFORE THE FREQUENCY ANALYSIS.
-    h1 = [np.zeros(DESP - muestrasMAX - 3), h[DESP - muestrasMAX - 3 :len(h)]]
-    h1[DESP + muestrasMAX + 1: len(h1)] = 0
+    h1 = np.zeros(DESP - muestrasMAX - 3)
+    h1 = np.append(h1, h[DESP - muestrasMAX - 3 :len(h)])
+    # print(DESP,muestrasMAX,len(h),len(h1))
+    h1[DESP + muestrasMAX + 1: len(h1)] = np.zeros(len(h1)-(DESP + muestrasMAX + 1))
     h1[DESP] = h1[DESP] / 2
-    B, I = np.flip(np.sort(h1))
-    H1 = [np.zeros(I[0] - 3), h[I(0) - 3:I(0) + 2], np.zeros(len(h) - (I[0] + 2))]
+    # B, I = np.flip(np.sort(h1))
+    # H1 = [np.zeros(I[0] - 3), h[I(0) - 3:I(0) + 2], np.zeros(len(h) - (I[0] + 2))]
     #FREQUENCY ANALYSIS TO OBTAIN THE DELAY(IN SAMPLES)
 
     # 1 - FFT
@@ -205,10 +300,10 @@ def doa(lefts, rights):
 
     #4 - SLOPE 'S AVERAGE
     lM = len(M) + 2#The slope M1 is not a unique value,
-    p1 = np.floor(lM / 2 - 4)#it 's an array. So we calculate the
-    p2 = np.ceil(lM / 2 + 4)# average of the values, K.
+    p1 = int(np.floor(lM / 2 - 4))#it 's an array. So we calculate the
+    p2 = int(np.ceil(lM / 2 + 4))# average of the values, K.
     K = np.mean(M[p1-1:p2])
-    Nprime = (-K * lh / (2 * np.pi))# Number of samples before % substracting DESP.
+    Nprime = (-K * lh / (2 * np.pi))# Number of samples before substracting DESP.
 
     # 5 - SAMPLES
     if Nprime < 0: #Two possible cases: negative or positive
@@ -228,6 +323,20 @@ def doa(lefts, rights):
     return angleGRAD1
 
 
+def lms(x, d, N = 4, mu = 0.05):
+    L = min(len(x),len(d))
+    h = np.zeros(N)
+    e = np.zeros(L-N)
+    for n in range(L-N):
+        x_n = x[n:n+N][::-1]
+        d_n = d[n]
+        y_n = np.dot(h, x_n.T)
+        e_n = d_n - y_n
+        h = h + mu * e_n * x_n
+        e[n] = e_n
+    return h
+
+'''
 #PERFORMS THE CALCULATION OF THE COEFFICIENTS OF THE FILTER h(n).
 # Inputs:   - x = Signal in MIC A
 #           - d = Signal in MIC B
@@ -260,7 +369,7 @@ def f_adap(x, d, h0, mu):
         h = h + mu * e[k] * xx# We update the filter coefficients.
 
     return h, y, e
-
+'''
 
 # OBTAIN THE COORDINATES OF THE POSITIONS WHERE THE SPEAKER CAN BE.
 # Inputs:   - muestras = Delay between signals in samples
@@ -270,9 +379,12 @@ def f_adap(x, d, h0, mu):
 # Outputs:  - y1 = Values of the y coordinate of the speaker
 def hiper(muestras, x, xA, fs):
     c = 340#speed of sound(m / sec)
-    pot = 2 * np.ones(1, len(x))
+    pot = 2 * np.ones(len(x))
     dist = muestras * c / fs# distance to B prime
-    y1 = np.sqrt(dist ** 2 / 4 - xA ** 2 + (4 * xA ** 2 / dist ** 2 - 1) * x ** pot)
+    v = dist ** 2 / 4 - xA ** 2 + (4 * xA ** 2 / dist ** 2 - 1) * x ** pot
+    # print(['{:.3f}'.format(x) for x in v])
+    # print(len([_ for _ in v if _ < 0]))
+    y1 = np.sqrt(np.abs(v))
     #formula with following % requisitions:
     # xA = -xB;
     # yA = yB = 0
@@ -306,6 +418,7 @@ def get_angle(N, fs, d_micro):
         angle = 0
 
     return angle
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
