@@ -157,16 +157,27 @@ def polyfit2d(x, y, z, degree=1, max_degree=None, scale=True, plot=False):
 if __name__ == "__main__":
     n = 5
     x = y = np.arange(n)
-    z = x *y
+    z = x**2 + y**2 + 100
 
     X, Y = np.meshgrid(x, y)
-    Z = X *Y
+    Z = X ** 2 +  Y**2 + 100
+    print(Z)
+
+    # X = np.zeros((5, 5))
+    # Y = np.zeros((5, 5))
+    # for i in range(len(x)):
+    #     X[i][i] = x[i]
+    #     Y[i][i] = y[i]
+
+    # print(X)
+    # print(Y)
+
     M = np.zeros((5,5))
     for i in range(len(z)):
         M[i][i] = z[i]
     print(M)
-    print(z,'\n', Z)
-    c = polyfit2d(X, Y, M, degree=2, plot=False)
+    # print(z,'\n', Z)
+    c = polyfit2d(X, Y, Z, degree=5, plot=False)
     print(c)
 
     f = np.polynomial.polynomial.polyval2d(x, y, c)

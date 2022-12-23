@@ -1,6 +1,8 @@
 import audioop
 import sys
 import struct
+
+import detect
 import pyaudio
 import math
 import numpy as np
@@ -16,6 +18,7 @@ from PyQt5.QtCore import QTimer
 from numpy import array, concatenate, argmax
 from numpy import abs as nabs
 from scipy.signal import fftconvolve
+from detect import DetectFootstep
 
 FORMAT = pyaudio.paInt16
 CHANNELS = 2
@@ -23,7 +26,8 @@ RATE = 44100
 FREQ_MAX = RATE // 2
 FREQ_MIN = 20
 CHUNK = 2 * RATE // FREQ_MIN
-DELAY = 20
+CHUNK = RATE
+DELAY = 1000
 
 
 class WinForm(QWidget):
@@ -128,6 +132,7 @@ class AudioStream:
         self.left_max_temp = 0
         self.right_max_temp = 0
 
+        self.detect = DetectFootstep()
     def update(self):
         wf_data = self.stream.read(CHUNK)
         cnt = len(wf_data) // 2
@@ -189,12 +194,34 @@ class AudioStream:
         self.m.left_x_axis.setLabel(self.left_max_temp, **self.m.sp_style)
         self.m.right_x_axis.setLabel(self.right_max_temp, **self.m.sp_style)
 
+        timestamps, freq, sxx_l = self.detect.detect_footstep(RATE, np.asarray(lefts))
+        if freq > 0:
+            sxx_r = self.detect.get_volume_at(timestamps, freq, np.asarray(rights), RATE)
+
+            for i in range(timestamps.shape[0]):
+                angle = self.calc_angle(sxx_l[i], sxx_r[i])
+                print("angle[{:d}]={:f}".format(i, angle))
         #
         # if v_rms > 30:
         #     # angle = doa(lefts, rights)
         #     angle = sound_direction(lefts, rights, cnt, 1)
         #     self.m.left_x_axis.setLabel("ANGLE:{:.0f}".format(angle), **self.m.sp_style)
 
+    def calc_angle(self, left, right):
+        c = [316.87223711, -1067.66273881, 1797.2452039, -1206.43752124, -283.1867752, 443.09698022]
+        if left < right:
+            x = left / right
+        else:
+            x = right / left
+        f = np.polynomial.polynomial.polyval(x, c)
+        angle = f * 360 / 881
+
+        if left < right:
+            angle = 90 - angle
+        else:
+            angle += 90
+
+        return angle
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self.timer.stop()
         self.stream.close()
